@@ -51,8 +51,7 @@ class Molecule(object):
         self.opt_perm = -1
 
     def compute_extent(self):
-        print(self.cxns)
-        print(np.linalg.norm(self.cxns[0:3,0]-self.cxns[0:3,0]))
+        # get the largest distance between any two connection points in the molecule
         self.max_extent = 0.0
         for i in range(np.shape(self.cxns)[1]):
             for j in range(np.shape(self.cxns)[1]):
