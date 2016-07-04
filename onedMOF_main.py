@@ -1152,9 +1152,12 @@ class Assembly(object):
                 final_label.append(self.mol.labels[j]+str(overall_ind))
                 overall_ind += 1
 
-                final_ra.append(oriented[i][0,j])
-                final_rb.append(oriented[i][1,j])
-                final_rc.append(oriented[i][2,j])
+                final_ra.append(float("{0:.6f}".format(oriented[i][0,j])))
+                final_rb.append(float("{0:.6f}".format(oriented[i][1,j])))
+                final_rc.append(float("{0:.6f}".format(oriented[i][2,j])))
+                #final_ra.append(oriented[i][0,j])
+                #final_rb.append(oriented[i][1,j])
+                #final_rc.append(oriented[i][2,j])
 
         # add shifted rods
         for i in range(len(rods)):
@@ -1163,9 +1166,12 @@ class Assembly(object):
                 final_label.append(self.rod_atmtype[i][j] + str(overall_ind))
                 overall_ind += 1
 
-                final_ra.append(self.rod_coords_abc[i][0,j])
-                final_rb.append(self.rod_coords_abc[i][1,j])
-                final_rc.append(self.rod_coords_abc[i][2,j])
+                final_ra.append(float("{0:.6f}".format(self.rod_coords_abc[i][0,j])))
+                final_rb.append(float("{0:.6f}".format(self.rod_coords_abc[i][1,j])))
+                final_rc.append(float("{0:.6f}".format(self.rod_coords_abc[i][2,j])))
+                #final_ra.append(self.rod_coords_abc[i][0,j])
+                #final_rb.append(self.rod_coords_abc[i][1,j])
+                #final_rc.append(self.rod_coords_abc[i][2,j])
 
         self.frame.reconstruct_cif(final_a, final_b, final_c, final_ra, final_rb, final_rc, 
                                    final_label, final_atmtype, self.mol.molname)
@@ -1257,9 +1263,12 @@ class Assembly(object):
                 final_label.append(self.mol.labels[j]+str(overall_ind))
                 overall_ind += 1
 
-                final_ra.append(oriented[i][0,j])
-                final_rb.append(oriented[i][1,j])
-                final_rc.append(oriented[i][2,j])
+                final_ra.append(float("{0:.6f}".format(oriented[i][0,j])))
+                final_rb.append(float("{0:.6f}".format(oriented[i][1,j])))
+                final_rc.append(float("{0:.6f}".format(oriented[i][2,j])))
+                #final_ra.append(self.rod_coords_abc[i][0,j])
+                #final_rb.append(self.rod_coords_abc[i][1,j])
+                #final_rc.append(self.rod_coords_abc[i][2,j])
 
         # add shifted rods
         for i in range(len(rods)):
@@ -1267,10 +1276,12 @@ class Assembly(object):
                 final_atmtype.append(self.rod_atmtype[i][j])
                 final_label.append(self.rod_atmtype[i][j] + str(overall_ind))
                 overall_ind += 1
-
-                final_ra.append(self.rod_coords_abc[i][0,j])
-                final_rb.append(self.rod_coords_abc[i][1,j])
-                final_rc.append(self.rod_coords_abc[i][2,j])
+                final_ra.append(float("{0:.6f}".format(self.rod_coords_abc[i][0,j])))
+                final_rb.append(float("{0:.6f}".format(self.rod_coords_abc[i][1,j])))
+                final_rc.append(float("{0:.6f}".format(self.rod_coords_abc[i][2,j])))
+                #final_ra.append(self.rod_coords_abc[i][0,j])
+                #final_rb.append(self.rod_coords_abc[i][1,j])
+                #final_rc.append(self.rod_coords_abc[i][2,j])
 
         self.frame.reconstruct_cif(final_a, final_b, final_c, final_ra, final_rb, final_rc, 
                                    final_label, final_atmtype, self.mol.molname)
