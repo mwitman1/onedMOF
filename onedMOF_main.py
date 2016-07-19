@@ -117,18 +117,23 @@ class Assembly(object):
         self.get_cxn_coords()
         self.get_cxn_extent()
         self.get_cxn_perms()
+
+        # determine the order that the components will be embedded
+        self.determine_assembly_order()
+
+
+        # prepare optimization 
         self.prepare_opt_vars()
         self.print_initialization()
 
         # print initialization of optimization variables
-        #self.get_starting_SVD_guess()
         print("\n\nOptimization starting guess:")
         self.write_results()
 
 
 
         # run optimization
-        self.run_optimization_stochastic()
+        self.run_optimization_stochastic_step_by_step()
         #self.run_optimization_GA()
 
         # output results
@@ -139,7 +144,33 @@ class Assembly(object):
         self.construct_final_UC_SVD()
 
 
+
+    
+    #######################################################################
+    # Extract all necessary crystallographic geometric data for optimization
+    #######################################################################
+
     def get_rod_coords(self):
+        """
+        Obtains all geometric data related to the rod coordinates
+
+
+        self.rod_coords_abc
+        self.rod_coords_xyz
+        --->  list of np.array((3,num_atoms_in_rod)) with len # of rods
+
+
+        self.rod_ref_abc
+        --->  NEED DESCRIPTION
+
+
+        self.rod_disp_xyz
+        --->  NEED DESCRIPTION
+
+
+        """
+
+
         # NOTE for now we have to identify rod centers in input file
         self.rod_centers_abc = [] 
         self.rod_centers_xyz = [] 
@@ -226,6 +257,25 @@ class Assembly(object):
 
 
     def get_cxn_coords(self):
+        """
+        Obtains all geometric data related to each cxn group that exits
+
+
+        self.cxn_abc
+        self.cxn_xyz
+        --->  NEED DESCRIPTION
+
+
+        self.cxn_ref_abc
+        --->  NEED DESCRIPTION
+
+
+        self.cxn_disp_xyz
+        --->  NEED DESCRIPTION
+
+
+        """
+
         self.cxn_abc = []
         self.cxn_xyz = []
 
@@ -310,9 +360,12 @@ class Assembly(object):
 
 
     def get_cxn_extent(self):
+        """
+        Takes a cxn group and finds the largest distance between any two points
+        """
+
         # NOTE only looks at first cxn group
         self.max_extent = 0
-        #for i in range(len(self.cxn_xyz)):
         for j in range(np.shape(self.cxn_xyz)[0]):
             this_extent = np.linalg.norm(self.cxn_xyz[0][0:3,0]-self.cxn_xyz[0][0:3,j])
             if(this_extent > self.max_extent):
@@ -332,22 +385,11 @@ class Assembly(object):
             #print(len(self.cxn_perms[i]))
             #print(self.cxn_perms[i])
 
-    def get_cxn_images(self):
-        """
-        For each cxn pt in a group, we need n periodic images to do the SVD transform on
-        """
-
-        self.cxn_images = []
-        
-        for i in range(len(self.cxns)):
-            for j in range(len(self.oned_imgs)):
-                pass
-            
 
     def compute_triclinic_xyz_shift(self, oned_abc_coord):
         """
         Triclinic shift refers to the shift in twod_direct coordinates that is induced
-        by a non-90 deg angle in the direction of oned_direct
+        by a non-orthogonal (ab or bc or ca) face to the oned_direct vector (c a b, respectively)
 
         This shift must be accounted for because we are going to optimize rod positions
         in the oned_direct, which means that triclinic shift will change throughout the optimization
@@ -361,8 +403,63 @@ class Assembly(object):
         shift_vec = np.dot(self.frame.to_cartesian, shift_vec)
         #print("%f %s" % (oned_abc_coord, str(shift_vec)))
         return shift_vec
+    
+
+
+    
+    #################################################
+    # Define optimization routines
+    #################################################
+
+    def determine_assembly_order(self):
+        """
+        Determine what order the components are optimized in
+        """ 
+
+        self.rods_to_embed = []
+        self.cxns_to_embed = []
+
+        for i in range(1,len(self.rods)):
+            success = False
+            self.rods_to_embed.append(i)
+            # find a cxn that links the ith rod to any of the 0 through (i-1)th rods
+            # furthermore that cxn should not already be in self.cxns_to_embed
+
+            for j in range(0,len(self.connect_to_rod)):
+                # only proceed if we haven't yet marked this cxn for embedding
+                if(j not in self.cxns_to_embed):
+
+                    # loop over each rod in the cxn group
+                    for k in range(0, len(self.connect_to_rod[j])):
+
+                        # only proceed if this cxn is connected  w/a rod that's already been embedded
+                        if(self.connect_to_rod[j][k] < i):
+                            self.cxns_to_embed.append(j)
+                            success = True
+                            break
+
+                if(success):
+                    break
+                            
+
+        #print(self.rods_to_embed)
+        #print(self.cxns_to_embed)
+        for i in range(0, len(self.cxns)):
+            if(i not in self.cxns_to_embed):
+                self.rods_to_embed.append(-1)
+                self.cxns_to_embed.append(i)
+
+        print("\n\nComputing assembly order:")
+        print(self.rods_to_embed)
+        print(self.cxns_to_embed)
+        if(len(self.rods_to_embed) != len(self.rods_to_embed)):
+            raise ValueError("Assembly order not correct, diff length for rods and cxns")
+        for i in range(len(self.rods_to_embed)):
+            print("Rod %s -> Cxn: %s"%(str(self.rods_to_embed[i]),str(self.cxns_to_embed[i]))) 
         
         
+        
+        # we arbitrarily say that rod 0 is fixed
 
     def print_initialization(self):
         print("Preparing optimization...")
@@ -402,12 +499,8 @@ class Assembly(object):
         #print(self.compute_triclinic_xyz_shift(2.0))
 
 
-    def shift_group_in_oned(self):
-        """
-        This fcn is important bc we need to inspect different integer images in the oned_direct
-        sometimes when evaluating fits
-        """
-        pass
+
+
 
     def prepare_opt_vars(self):
         # the scaling factor to increase the lattice params in the non-1D direction
@@ -550,7 +643,6 @@ class Assembly(object):
 
         return M, rmse, fit 
 
-
     def construct_curr_UC_SVD(self, xuse):
         """
         Creates the current representation of the unit cell so that we can
@@ -568,57 +660,29 @@ class Assembly(object):
 
         # recompute UC matrix transformation based on current scale factor
         to_cartesian = self.frame.update_UC_matrix(xuse[0], self.twod_direct)
-        #to_fractional = np.linalg.inv(to_cartesian)
-        #print(to_cartesian)
 
-        # get the current oriented and translated ligands
-        # oriented = self.orient_cxn_and_translate(xuse)
-
-
-        # get final connection pt coords on molecule
-        #for i in range(len(oriented)):
-        #    oriented[i][0:3,:] = np.dot(to_fractional, oriented[i][0:3,:])
-        #    oriented[i][0:3,:] = self.frame.modGroupUC(oriented[i][0:3,:])
-        #    oriented[i][0:3,:] = np.dot(to_cartesian, oriented[i][0:3,:])
-
-
-        #final_xyz = []
-        #new_abc = np.copy(self.cxn_ref_abc)
-        #print(new_abc)
-        #print(np.shape(new_abc))
-        #print(self.cxn_ref_abc)
-        #print(np.shape(self.cxn_ref_abc))
-
-
+        # objective fcn val
         totalRMSE = 0.0
 
         # do this routine for  each cxn group
         for i in range(len(self.cxns)):
-        #    print("\n\nCxn group %d:" % (i))
             # for each cxn group, we need the original cxn coords and all their possible oned imgs
             this_new_abc = np.zeros((3,np.shape(self.cxn_ref_abc[i])[1] * len(self.oned_imgs)))
 
-            #print(this_new_abc)
             # loop over each cxn atom
             for j in range(len(self.cxns[i])):
                 # loop over each 1D img of that cxn atom
                 for k in range(len(self.oned_imgs)):
                     # cxns[i]1  cxns[i]2
-                    # print(k + j*len(self.oned_imgs))
-                    #print(self.cxn_ref_abc[i][:,j]) 
                     this_new_abc[:, k + j*len(self.oned_imgs)] = self.cxn_ref_abc[i][:,j]
                     # shift ref pt based on curr val of rod shift
                     # shift ref pt as well based on the periodic image indicated in the opt_Vec
-                    # print(xuse[1 + self.connect_to_rod[i][j]])
-                    #print(xuse[1 + self.connect_to_rod[i][j]]+self.oned_imgs[k])
                     this_new_abc[self.oned_direct, k + j*len(self.oned_imgs)] += xuse[1 + self.connect_to_rod[i][j]]+self.oned_imgs[k]
 
-            #print(this_new_abc)
 
             # get the new xyz of all points
-            
             this_new_xyz = np.dot(to_cartesian, this_new_abc)
-            #print(this_new_xyz)
+
             # apply shift (this is the fixed relative positions in rod constraint)
             # non-trivial if we have non perpendicular oned_direct, but we took care of this
             # in self.get_cxn_coords()
@@ -627,19 +691,12 @@ class Assembly(object):
             for j in range(len(self.cxns[i])):
                 # loop over each 1D img of that cxn atom
                 for k in range(len(self.oned_imgs)):
-                    #print(this_new_xyz[:, k + j*len(self.oned_imgs)])
-                    #print(self.cxn_disp_xyz[i][:,j])
                     this_new_xyz[:, k + j*len(self.oned_imgs)] += self.cxn_disp_xyz[i][:,j]
 
-            #print(this_new_xyz)
 
             this_opt_perm_err = 100000000.0
             for perm in self.cxn_perms[i]:
-                #print(perm)
-                #print(self.mol.cxns)
-                #print(this_new_xyz[:, perm])
                 M, rmse, fit = self.evaluate_RMSE_from_SVD(self.mol.cxns, this_new_xyz[:, perm])
-                #print(rmse)
 
                 if(rmse < this_opt_perm_err):
                     this_opt_perm_err = rmse
@@ -651,30 +708,12 @@ class Assembly(object):
                     # break our loop over permutations if we've found the answer
                     break
             
-            
-
-            
             totalRMSE += this_opt_perm_err
-            # if(i == 0):
-                #print(xuse)
-                #print(self.mol.cxns)
-                #print(this_new_xyz)
-                #print(np.dot(to_fractional,this_new_xyz))
-                ##print(this_new_xyz[:,[self.opt_perms[0]]])
-                ##print(this_new_xyz[:,self.cxn_perms[0][0]])
-                #print(this_opt_perm_err)
-            
-                
-        #    print(np.dot(self.opt_mol_fit[i], self.mol.cxns))
-        #    print(self.opt_perms)
-        #print(self.opt_perms)
-        #sys.exit()
-
 
 
         return totalRMSE
 
-    def construct_curr_UC_GA(self, xuse):
+    def construct_curr_UC_SVD_initial(self, xuse, it, rod_ind, cxn_ind):
         """
         Creates the current representation of the unit cell so that we can
         evaluate how well the components are embedded in 3 space
@@ -689,104 +728,95 @@ class Assembly(object):
         # 1: stasrt with opt_vec[0] (F) and opt_vec[1:n_rods] (set of dCs)
         # 2: recompute cxn points based on F and dCs
 
+
+        
+
+
         # recompute UC matrix transformation based on current scale factor
-        to_cartesian = self.frame.update_UC_matrix(xuse[0], self.twod_direct)
-        to_fractional = np.linalg.inv(to_cartesian)
+        if(it == 0):
+            to_cartesian = self.frame.update_UC_matrix(xuse[0], self.twod_direct)
+        else:
+            # do nothing, to_cartesian already optimized
+            to_cartesian = self.frame.update_UC_matrix(self.opt_vec[0], self.twod_direct)
 
-        # get the current oriented and translated ligands
-        oriented = self.orient_cxn_and_translate(xuse)
+        # objective fcn val
+        totalRMSE = 0.0
 
+        # do this routine for  each cxn group
+        for i in range(cxn_ind, cxn_ind+1):
+            # for each cxn group, we need the original cxn coords and all their possible oned imgs
+            this_new_abc = np.zeros((3,np.shape(self.cxn_ref_abc[i])[1] * len(self.oned_imgs)))
 
-        # get final connection pt coords on molecule
-        for i in range(len(oriented)):
-            oriented[i][0:3,:] = np.dot(to_fractional, oriented[i][0:3,:])
-            oriented[i][0:3,:] = self.frame.modGroupUC(oriented[i][0:3,:])
-            oriented[i][0:3,:] = np.dot(to_cartesian, oriented[i][0:3,:])
-
-
-        final_xyz = []
-        #new_abc = np.copy(self.cxn_ref_abc)
-        #print(new_abc)
-        #print(np.shape(new_abc))
-        #print(self.cxn_ref_abc)
-        #print(np.shape(self.cxn_ref_abc))
-
-        # get final connection pt coords on rod
-        for i in range(len(self.cxns)):
-            this_new_abc = np.copy(self.cxn_ref_abc[i])
-
-            # start of this cxn info in the optimization vec
-            conn_start_ind = 1 + len(self.rods) + i*6 + i*len(self.cxns[i])
-
+            # loop over each cxn atom
             for j in range(len(self.cxns[i])):
+                # loop over each 1D img of that cxn atom
+                for k in range(len(self.oned_imgs)):
+                    # cxns[i]1  cxns[i]2
+                    this_new_abc[:, k + j*len(self.oned_imgs)] = self.cxn_ref_abc[i][:,j]
+                    # shift ref pt based on curr val of rod shift
+                    # shift ref pt as well based on the periodic image indicated in the opt_Vec
+                
+                    # NOTE we only want to shift the rod we are currently optimizing    
+                    if(rod_ind != -1):
+                        #this_new_abc[self.oned_direct, k + j*len(self.oned_imgs)] += xuse[1 + self.connect_to_rod[i][j]]+self.oned_imgs[k]
+                        # check if the pt in this cxn is attached to rod under current optimization
+                        if(self.connect_to_rod[i][j] == rod_ind):
+                            if(it == 0):
+                                # just bc the number of opt variables is diff if it's the first assembly step
+                                this_new_abc[self.oned_direct, k + j*len(self.oned_imgs)] += xuse[1]+self.oned_imgs[k]
+                            else:
+                                this_new_abc[self.oned_direct, k + j*len(self.oned_imgs)] += xuse[0]+self.oned_imgs[k]
+                        else:
+                            this_new_abc[self.oned_direct, k + j*len(self.oned_imgs)] += self.opt_vec[1 + self.connect_to_rod[i][j]]+self.oned_imgs[k]
+                
+                            
+                    else:
+                        this_new_abc[self.oned_direct, k + j*len(self.oned_imgs)] += self.oned_imgs[k]
+                
 
-                # shift ref pt based on curr val of rod shift
-                # print(xuse[1 + self.connect_to_rod[i][j]])
-                this_new_abc[self.oned_direct,j] += xuse[1 + self.connect_to_rod[i][j]]
 
-                # shift ref pt as well based on the periodic image indicated in the opt_Vec
-                periodic_image = round(xuse[conn_start_ind + 6 + j], 0)
-                this_new_abc[self.oned_direct,j] += periodic_image
-
-            # get the new xyz
+            # get the new xyz of all points
             this_new_xyz = np.dot(to_cartesian, this_new_abc)
+
             # apply shift (this is the fixed relative positions in rod constraint)
             # non-trivial if we have non perpendicular oned_direct, but we took care of this
             # in self.get_cxn_coords()
-            #shifted_xyz = new_xyz + self.cxn_disp_xyz[i][:,j]
-            this_shifted_xyz = this_new_xyz + self.cxn_disp_xyz[i]
-
             
-            # use modified UC matrix to get back abc coords
-            this_shifted_abc = np.dot(to_fractional, this_shifted_xyz)
-            # mod cxns back into the UC if they left
-            this_modded_abc = self.frame.modGroupUC(this_shifted_abc)
+            # loop over each cxn atom
+            for j in range(len(self.cxns[i])):
+                # loop over each 1D img of that cxn atom
+                for k in range(len(self.oned_imgs)):
+                    this_new_xyz[:, k + j*len(self.oned_imgs)] += self.cxn_disp_xyz[i][:,j]
 
 
-            # final xyz coords in UC
-            this_final_xyz = np.dot(to_cartesian, this_modded_abc)
-            final_xyz.append(this_final_xyz)
+            this_opt_perm_err = 100000000.0
+            for perm in self.cxn_perms[i]:
+                M, rmse, fit = self.evaluate_RMSE_from_SVD(self.mol.cxns, this_new_xyz[:, perm])
 
-        #print(final_xyz)
+                if(rmse < this_opt_perm_err):
+                    this_opt_perm_err = rmse
+                    self.opt_perms[i] = perm
+                    self.opt_mol_fit[i] = M
 
-        # finally evaluate RMSE from all possible permutations
-        minRMSE = 0.0
+                if(rmse < 0.1):
+                    # This is a stopping criteria for the rmse
+                    # break our loop over permutations if we've found the answer
+                    break
+            
+            totalRMSE += this_opt_perm_err
 
-        # i indexes the molecule we are fitting
-        # need to iterate over this one first bc each molecule could have its own permutation
-        # NOTE for now just optiize based on 1 molecule fitting
-        for i in range(len(self.cxns)):
-        # for i in [1]:
-
-            thisMolRMSE = 1000000.0
-
-            indOfMinPerm = -1
-            currInd = 0
-            for it in self.mol.permutations:
-                thisPermRMSE = 0.0
-
-                # j indexes each connection pt in the molecule
-                for j in range(len(self.cxns[i])):
-                    thisPermRMSE += self.rmse(final_xyz[i][:,j], oriented[i][0:3,it[j]])
+        if(rod_ind == -1):
+            # in this case we only we're finding the best cxn fit w/o adjusting rod position
+            # return 0.0 so the optimization succeeds and quits after 1 fcn iteration
+            return 0.0
+        else:
+            return totalRMSE
 
 
-                if(thisPermRMSE < thisMolRMSE):
-                    thisMolRMSE = float(thisPermRMSE)
-                    indOfMinPerm = int(currInd)
-                currInd += 1
-
-            minRMSE += thisMolRMSE
-
-        #pass
-        #print("%d %f" % (indOfMinPerm, minRMSE))
-        return minRMSE,
 
     def rmse(self, xyz1, xyz2):
-        return np.exp(np.linalg.norm(xyz1 - xyz2))
-
-
-
-
+        #return np.exp(np.linalg.norm(xyz1 - xyz2))
+        return np.linalg.norm(xyz1 - xyz2)
 
 
     def run_optimization_deterministic(self):
@@ -816,248 +846,401 @@ class Assembly(object):
         self.opt_vec = result.x
         print(result)
     
-    def geometry_mutation(self, some_list):
-        return([0.5 for i in range(len(some_list))])
 
-    def checkStrategy(self, minstrategy, maxstrategy, minvalue, maxvalue):
-        """
-        Decorator that limits the min and max values of all individuals' attributes
-        and strength of those attributes' mutations
-        """
-        def decorator(func):
-            def wrapper(*args, **kwargs):
-                children = func(*args, **kwargs)
-                for child in children:
-                    for i, s in enumerate(child.strategy):
-                        if s < minstrategy:
-                            child.strategy[i] = minstrategy
-                        #if s > maxstrategy:
-                        #    # is it possible to not use a max strategy ?
-                        #    child.strategy[i] = maxstrategy
-                        #if child[i] < minvalue:
-                        #    child[i] = minvalue
-                        #if child[i] > maxvalue:
-                        #    # is it possible to not bound upper attribute limit ?
-                        #    child[i] = maxvalue
-                return children
-            return wrapper
-        return decorator
+    def run_optimization_stochastic_step_by_step(self):
 
-    def generateES(self, some_list, icls, scls, size, imin, imax, smin, smax):
-        """
-        Initialization function for an evolution strategy
-        (http://deap.gel.ulaval.ca/doc/dev/examples/es_fctmin.html)
-    
-        Evolution strategy where mutation strength is learned throughout the evolution
-        e.g. Control the standard deviation of the mutation for each attribute of an individual
-        by an evolution similar to individual evolution in a classic GA
-    
-        Evolution strategies are critical for solution convergence if initital guesses are 
-        far from true solution
-    
-        This is crucial for complicated potentials where an good initial guess is extremely
-        non-trivial
-        (If we are fitting LJ pot we can always use UFF/Dreiding as a reasonable starting
-        guess, in which case we can usually converge fairly easily to a solution, but if we
-        start out with guesses of 1 for all eps, sig, then the algo will not gain traction
-        in any reasonable time frame)
-    
-        icls = class of individual to instantiate
-        scls = class of strategy to use as strategy
-        size = size of individ
-        imin = minimum value for individual
-        imax = maximum value for individual
-        smin = minimum value for standard deviation of all individual's attributes' mutation
-        smax = maximum value for standard deviation of all individual's attributes' mutation
-        """
-    
-        # Use a random starting guess for parameters (pretty bad idea)
-        # ind = icls(random.uniform(imin, imax) for _ in range(size))
-        # Use a good starting guess for parameters
-        ind = icls(some_list)
-    
-        # Use a random starting guess for each parameters mutation strength (pretty bad idea)
-        # ind.strategy = scls(random.uniform(smin, smax) for _ in range(size))
-        # Use a good starting guess for parameter mutation strength
-        ind.strategy = scls(self.geometry_mutation(some_list))
-    
-        return ind
+        print("\n\nAttempting a step by step assembly:")
+        xvec = deepcopy(self.opt_vec)
+        bounds = deepcopy(self.opt_bounds)
 
-    def custom_migRing(self, populations, k, selection, replacement=None, migarray=None):
-        nbr_demes = len(populations)
-        if migarray is None:
-            migarray = range(1, nbr_demes) + [0]
-    
-        immigrants = [[] for i in xrange(nbr_demes)]
-        emigrants = [[] for i in xrange(nbr_demes)]
-    
-        for from_deme in xrange(nbr_demes):
-            emigrants[from_deme].extend(selection(populations[from_deme], k))
-            if replacement is None:
-                # If no replacement strategy is selected, replace those who migrate
-                immigrants[from_deme] = emigrants[from_deme]
+        self.opt_vec[0] = 0.8
+        for i in range(0, len(self.rods_to_embed)):
+            rod_ind = self.rods_to_embed[i]
+            cxn_ind = self.cxns_to_embed[i]
+
+            if(i ==0):
+                this_xvec = deepcopy(self.opt_vec[0:2])
             else:
-                # Else select those who will be replaced
-                immigrants[from_deme].extend(replacement(populations[from_deme], k))
-    
-        for from_deme, to_deme in enumerate(migarray):
-            for i, immigrant in enumerate(immigrants[to_deme]):
-                indx = populations[to_deme].index(immigrant)
-                populations[to_deme][indx] = emigrants[from_deme][i]
-
-    def run_optimization_GA(self):
-
-        # Shape of optimization parameters
-        OPT_SHAPE = (len(self.opt_vec))
-        
-        # flattening of optimization parameters (size of an individual genome)
-        IND_SIZE = np.prod(OPT_SHAPE)
-        
-        # population size for parameter optimization
-        # 3 * # attributes per individual
-        POP_SIZE = IND_SIZE * 4
-        
-        # number of islands (subpopulations that evolve independently until a migration)
-        NISLANDS = 3
-        
-        # set max number of generations to run for
-        NGEN = 60
-        
-        # Migrations frequency
-        MIG_FREQ = 20
-        
-        # Evolution strategy variables
-        MIN_VALUE = 0.0            # individual attribute min 
-        MAX_VALUE = 7.0     # individual attribute max
-        MIN_STRATEGY = 0.0         # min value of strength of mutation
-        MAX_STRATEGY = 1.5      # max value of strength of mutation
-        
-        # If we want to run optimization in parallel, all information must be accessed
-        # through picklable data types in python
-        #ffobj.optimization_shape=(ffobj.guest.ncomp, ffobj.grid.ncomp, ffobj.model.num_params)
-        #pickled = convert_ffobj_to_dict(ffobj)
-        
-        opt_weights = (-1.0,)
-        
-        
-        
-        
-        creator.create("FitnessMin", base.Fitness, weights = opt_weights)
-        creator.create("Individual", list, fitness=creator.FitnessMin, strategy = None)
-        creator.create("Strategy", list)
-        
-        toolbox = base.Toolbox()
-        
-        # function calls to chromosome intialization (random vs intelligent assignment)
-        #toolbox.register("rand_float", np.random.uniform)
-        #toolbox.register("assign_guess", self.assign_UFF_starting) 
-        
-        # create individual intialization method (random vs intelligent assignment)
-        toolbox.register("individual", self.generateES, self.opt_vec, creator.Individual, creator.Strategy,
-                                                                                IND_SIZE,
-                                                                                MIN_VALUE,
-                                                                                MAX_VALUE,
-                                                                                MIN_STRATEGY,
-                                                                                MAX_STRATEGY)
-        #toolbox.register("individual", toolbox.assign_guess, creator.Individual)
-        
-        
-        
-        # objective function for this minimization 
-        # toolbox.register("evaluate", self.deap_multi_evalFitness)
-        toolbox.register("evaluate", self.construct_curr_UC_GA)
-        
-        # define evolution strategies
-        toolbox.register("mate", tools.cxESBlend, alpha=0.5)
-        toolbox.decorate("mate", self.checkStrategy(MIN_VALUE,
-                                               MAX_VALUE,
-                                               MAX_STRATEGY,
-                                               MAX_STRATEGY)
-                        )
-
-        ###toolbox.register("mutate", tools.mutPolynomialBounded, eta = 0.0001, low = 0.0, up = 10000.0, indpb = 0.1)
-        toolbox.register("mutate", tools.mutESLogNormal, c = 1.0, indpb = 0.9)
-        toolbox.decorate("mutate", self.checkStrategy(MIN_VALUE,
-                                                 MAX_VALUE,
-                                                 MAX_STRATEGY,
-                                                 MAX_STRATEGY)
-                        )
-        ###toolbox.register("mutate", tools.mutESLogNormal, c = 1, indpb = 0.1)
-        
-        toolbox.register("select", tools.selTournament, tournsize = int(POP_SIZE/2))
-        ###toolbox.register("select", tools.selTournament, k = 10, tournsize = 64)
-        
-        
-        # parallelize or no
-        #pool = multiprocessing.Pool(processes = 7)
-        #toolbox.register("map", pool.map)
-        
-        
-        
-        # create a population of individuals
-        toolbox.register("population", tools.initRepeat, list, toolbox.individual, n = POP_SIZE)
-        population = toolbox.population()
-
-        # create islands to contain distinct populations
-        islands = [toolbox.population() for i in range(NISLANDS)]
-        
-        # create a hall of fame for each island
-        hofsize = max(1, int(POP_SIZE/10))
-        famous = [tools.HallOfFame(maxsize = hofsize) for i in range(NISLANDS)]
-        
-        # create a stats log for each island
-        stats = [tools.Statistics(lambda ind: ind.fitness.values) for i in range(NISLANDS)]
-        
-        for i in range(NISLANDS):
-            stats[i].register("avg", np.mean)
-            stats[i].register("std", np.std)
-            stats[i].register("min", np.min)
-            stats[i].register("max", np.max)
-        
-        
-        # MU, LAMDA parameters
-        MU, LAMBDA = POP_SIZE, POP_SIZE*2
-        
-        # run optimization with periodic migration between islands
-        for i in range(int(NGEN/MIG_FREQ)):
-            print("----------------")
-            print("Evolution period: " + str(i))
-            print("----------------")
-            for k in range(len(islands)):
-                print("------------------------")
-                print("Island " + str(k) + " evolution:")
-                print("------------------------")
-                #islands[k], log = algorithms.eaGenerateUpdate(toolbox, ngen = MIG_FREQ, halloffame = famous[k], stats = stats[k])
-                islands[k], log = algorithms.eaMuCommaLambda(islands[k], toolbox, mu=MU, lambda_ = LAMBDA, cxpb = 0.4, mutpb = 0.6, ngen = MIG_FREQ, halloffame = famous[k], stats = stats[k])
-            print("---------------")
-            print("MIGRATION!")
-            print("---------------")
-            self.custom_migRing(islands, 10, tools.selBest, replacement = tools.selWorst)
-        
-        # Create final population for the last run
-        final_famous = tools.HallOfFame(maxsize = 1)
-        final_stats = tools.Statistics(lambda ind: ind.fitness.values)
-        final_stats.register("avg", np.mean)
-        final_stats.register("std", np.std)
-        final_stats.register("min", np.min)
-        final_stats.register("max", np.max)
-        toolbox.register("final_population", tools.initRepeat, list, toolbox.individual, n = hofsize * NISLANDS)
-        final_population = toolbox.final_population()
-        
-        # copy over each island's famous individuals into last 
-        for i in range(NISLANDS):
-            for j in range(hofsize):
-                final_population[i*j + j] = famous[i][j]
-        
-        # make sure our ultimate hall of fame starts out as the best we've ever seen
-        final_famous.update(final_population)
-        
-        # reset MU, LAMBDA and rerun final evolution
-        MU, LAMBDA = hofsize*NISLANDS, hofsize*NISLANDS*2
-        final_pop, log = algorithms.eaMuCommaLambda(final_population, toolbox, mu=MU, lambda_ = LAMBDA, cxpb = 0.4, mutpb = 0.6, ngen = MIG_FREQ, halloffame = final_famous, stats = final_stats)
+                this_xvec = deepcopy(self.opt_vec[1+rod_ind:1+rod_ind+1])
 
 
-        self.opt_vec = np.array(final_famous[0])
+            result = scipy.optimize.minimize(self.construct_curr_UC_SVD_initial, 
+                                             this_xvec, 
+                                             args=(int(i),rod_ind,cxn_ind),
+                                             method='Nelder-Mead', 
+                                             #options ={'xtol': 0.1, 'ftol':0.1}#,  
+                                                       #'maxiter':2, 'maxfev':1})
+                                                       #'maxiter':100000, 'maxfev':100000}
+                                            )
+            print(result)
+            if(i == 0):
+                self.opt_vec[0] = float(result.x[0])
+                print("(1) Scale factor, F: %s"%(self.opt_vec[0])) 
+                print("(2) Vector of rod shifts, dCs:")
+                if(rod_ind != -1):
+                    self.opt_vec[1+rod_ind] += result.x[1]
+                    print("Rod %d: %s"%(rod_ind,self.opt_vec[1+rod_ind]))
+                    
+
+            else:
+                if(rod_ind != -1):
+                    self.opt_vec[1+rod_ind] += result.x[0]
+                    print("Rod %d: %s"%(rod_ind,self.opt_vec[1+rod_ind]))
+                
+            
+
+
+
+    #def construct_curr_UC_GA(self, xuse):
+    #    """
+    #    Creates the current representation of the unit cell so that we can
+    #    evaluate how well the components are embedded in 3 space
+
+    #    NOTE: we may have to break this optimization into several pieces:
+    #        (1) determine embedding by fitting one molecule
+    #        (2) only optimize the remaining molecule orientations/translations with the fixed
+    #            embedding variables (F, {dCs})
+    #    """
+
+    #    # Steps to reconstruct unit cell
+    #    # 1: stasrt with opt_vec[0] (F) and opt_vec[1:n_rods] (set of dCs)
+    #    # 2: recompute cxn points based on F and dCs
+
+    #    # recompute UC matrix transformation based on current scale factor
+    #    to_cartesian = self.frame.update_UC_matrix(xuse[0], self.twod_direct)
+    #    to_fractional = np.linalg.inv(to_cartesian)
+
+    #    # get the current oriented and translated ligands
+    #    oriented = self.orient_cxn_and_translate(xuse)
+
+
+    #    # get final connection pt coords on molecule
+    #    for i in range(len(oriented)):
+    #        oriented[i][0:3,:] = np.dot(to_fractional, oriented[i][0:3,:])
+    #        oriented[i][0:3,:] = self.frame.modGroupUC(oriented[i][0:3,:])
+    #        oriented[i][0:3,:] = np.dot(to_cartesian, oriented[i][0:3,:])
+
+
+    #    final_xyz = []
+    #    #new_abc = np.copy(self.cxn_ref_abc)
+    #    #print(new_abc)
+    #    #print(np.shape(new_abc))
+    #    #print(self.cxn_ref_abc)
+    #    #print(np.shape(self.cxn_ref_abc))
+
+    #    # get final connection pt coords on rod
+    #    for i in range(len(self.cxns)):
+    #        this_new_abc = np.copy(self.cxn_ref_abc[i])
+
+    #        # start of this cxn info in the optimization vec
+    #        conn_start_ind = 1 + len(self.rods) + i*6 + i*len(self.cxns[i])
+
+    #        for j in range(len(self.cxns[i])):
+
+    #            # shift ref pt based on curr val of rod shift
+    #            # print(xuse[1 + self.connect_to_rod[i][j]])
+    #            this_new_abc[self.oned_direct,j] += xuse[1 + self.connect_to_rod[i][j]]
+
+    #            # shift ref pt as well based on the periodic image indicated in the opt_Vec
+    #            periodic_image = round(xuse[conn_start_ind + 6 + j], 0)
+    #            this_new_abc[self.oned_direct,j] += periodic_image
+
+    #        # get the new xyz
+    #        this_new_xyz = np.dot(to_cartesian, this_new_abc)
+    #        # apply shift (this is the fixed relative positions in rod constraint)
+    #        # non-trivial if we have non perpendicular oned_direct, but we took care of this
+    #        # in self.get_cxn_coords()
+    #        #shifted_xyz = new_xyz + self.cxn_disp_xyz[i][:,j]
+    #        this_shifted_xyz = this_new_xyz + self.cxn_disp_xyz[i]
+
+    #        
+    #        # use modified UC matrix to get back abc coords
+    #        this_shifted_abc = np.dot(to_fractional, this_shifted_xyz)
+    #        # mod cxns back into the UC if they left
+    #        this_modded_abc = self.frame.modGroupUC(this_shifted_abc)
+
+
+    #        # final xyz coords in UC
+    #        this_final_xyz = np.dot(to_cartesian, this_modded_abc)
+    #        final_xyz.append(this_final_xyz)
+
+    #    #print(final_xyz)
+
+    #    # finally evaluate RMSE from all possible permutations
+    #    minRMSE = 0.0
+
+    #    # i indexes the molecule we are fitting
+    #    # need to iterate over this one first bc each molecule could have its own permutation
+    #    # NOTE for now just optiize based on 1 molecule fitting
+    #    for i in range(len(self.cxns)):
+    #    # for i in [1]:
+
+    #        thisMolRMSE = 1000000.0
+
+    #        indOfMinPerm = -1
+    #        currInd = 0
+    #        for it in self.mol.permutations:
+    #            thisPermRMSE = 0.0
+
+    #            # j indexes each connection pt in the molecule
+    #            for j in range(len(self.cxns[i])):
+    #                thisPermRMSE += self.rmse(final_xyz[i][:,j], oriented[i][0:3,it[j]])
+
+
+    #            if(thisPermRMSE < thisMolRMSE):
+    #                thisMolRMSE = float(thisPermRMSE)
+    #                indOfMinPerm = int(currInd)
+    #            currInd += 1
+
+    #        minRMSE += thisMolRMSE
+
+    #    #pass
+    #    #print("%d %f" % (indOfMinPerm, minRMSE))
+    #    return minRMSE,
+    #
+
+    #def geometry_mutation(self, some_list):
+    #    return([0.5 for i in range(len(some_list))])
+
+    #def checkStrategy(self, minstrategy, maxstrategy, minvalue, maxvalue):
+    #    """
+    #    Decorator that limits the min and max values of all individuals' attributes
+    #    and strength of those attributes' mutations
+    #    """
+    #    def decorator(func):
+    #        def wrapper(*args, **kwargs):
+    #            children = func(*args, **kwargs)
+    #            for child in children:
+    #                for i, s in enumerate(child.strategy):
+    #                    if s < minstrategy:
+    #                        child.strategy[i] = minstrategy
+    #                    #if s > maxstrategy:
+    #                    #    # is it possible to not use a max strategy ?
+    #                    #    child.strategy[i] = maxstrategy
+    #                    #if child[i] < minvalue:
+    #                    #    child[i] = minvalue
+    #                    #if child[i] > maxvalue:
+    #                    #    # is it possible to not bound upper attribute limit ?
+    #                    #    child[i] = maxvalue
+    #            return children
+    #        return wrapper
+    #    return decorator
+
+    #def generateES(self, some_list, icls, scls, size, imin, imax, smin, smax):
+    #    """
+    #    Initialization function for an evolution strategy
+    #    (http://deap.gel.ulaval.ca/doc/dev/examples/es_fctmin.html)
+    #
+    #    Evolution strategy where mutation strength is learned throughout the evolution
+    #    e.g. Control the standard deviation of the mutation for each attribute of an individual
+    #    by an evolution similar to individual evolution in a classic GA
+    #
+    #    Evolution strategies are critical for solution convergence if initital guesses are 
+    #    far from true solution
+    #
+    #    This is crucial for complicated potentials where an good initial guess is extremely
+    #    non-trivial
+    #    (If we are fitting LJ pot we can always use UFF/Dreiding as a reasonable starting
+    #    guess, in which case we can usually converge fairly easily to a solution, but if we
+    #    start out with guesses of 1 for all eps, sig, then the algo will not gain traction
+    #    in any reasonable time frame)
+    #
+    #    icls = class of individual to instantiate
+    #    scls = class of strategy to use as strategy
+    #    size = size of individ
+    #    imin = minimum value for individual
+    #    imax = maximum value for individual
+    #    smin = minimum value for standard deviation of all individual's attributes' mutation
+    #    smax = maximum value for standard deviation of all individual's attributes' mutation
+    #    """
+    #
+    #    # Use a random starting guess for parameters (pretty bad idea)
+    #    # ind = icls(random.uniform(imin, imax) for _ in range(size))
+    #    # Use a good starting guess for parameters
+    #    ind = icls(some_list)
+    #
+    #    # Use a random starting guess for each parameters mutation strength (pretty bad idea)
+    #    # ind.strategy = scls(random.uniform(smin, smax) for _ in range(size))
+    #    # Use a good starting guess for parameter mutation strength
+    #    ind.strategy = scls(self.geometry_mutation(some_list))
+    #
+    #    return ind
+
+    #def custom_migRing(self, populations, k, selection, replacement=None, migarray=None):
+    #    nbr_demes = len(populations)
+    #    if migarray is None:
+    #        migarray = range(1, nbr_demes) + [0]
+    #
+    #    immigrants = [[] for i in xrange(nbr_demes)]
+    #    emigrants = [[] for i in xrange(nbr_demes)]
+    #
+    #    for from_deme in xrange(nbr_demes):
+    #        emigrants[from_deme].extend(selection(populations[from_deme], k))
+    #        if replacement is None:
+    #            # If no replacement strategy is selected, replace those who migrate
+    #            immigrants[from_deme] = emigrants[from_deme]
+    #        else:
+    #            # Else select those who will be replaced
+    #            immigrants[from_deme].extend(replacement(populations[from_deme], k))
+    #
+    #    for from_deme, to_deme in enumerate(migarray):
+    #        for i, immigrant in enumerate(immigrants[to_deme]):
+    #            indx = populations[to_deme].index(immigrant)
+    #            populations[to_deme][indx] = emigrants[from_deme][i]
+
+    #def run_optimization_GA(self):
+
+    #    # Shape of optimization parameters
+    #    OPT_SHAPE = (len(self.opt_vec))
+    #    
+    #    # flattening of optimization parameters (size of an individual genome)
+    #    IND_SIZE = np.prod(OPT_SHAPE)
+    #    
+    #    # population size for parameter optimization
+    #    # 3 * # attributes per individual
+    #    POP_SIZE = IND_SIZE * 4
+    #    
+    #    # number of islands (subpopulations that evolve independently until a migration)
+    #    NISLANDS = 3
+    #    
+    #    # set max number of generations to run for
+    #    NGEN = 60
+    #    
+    #    # Migrations frequency
+    #    MIG_FREQ = 20
+    #    
+    #    # Evolution strategy variables
+    #    MIN_VALUE = 0.0            # individual attribute min 
+    #    MAX_VALUE = 7.0     # individual attribute max
+    #    MIN_STRATEGY = 0.0         # min value of strength of mutation
+    #    MAX_STRATEGY = 1.5      # max value of strength of mutation
+    #    
+    #    # If we want to run optimization in parallel, all information must be accessed
+    #    # through picklable data types in python
+    #    #ffobj.optimization_shape=(ffobj.guest.ncomp, ffobj.grid.ncomp, ffobj.model.num_params)
+    #    #pickled = convert_ffobj_to_dict(ffobj)
+    #    
+    #    opt_weights = (-1.0,)
+    #    
+    #    
+    #    
+    #    
+    #    creator.create("FitnessMin", base.Fitness, weights = opt_weights)
+    #    creator.create("Individual", list, fitness=creator.FitnessMin, strategy = None)
+    #    creator.create("Strategy", list)
+    #    
+    #    toolbox = base.Toolbox()
+    #    
+    #    # function calls to chromosome intialization (random vs intelligent assignment)
+    #    #toolbox.register("rand_float", np.random.uniform)
+    #    #toolbox.register("assign_guess", self.assign_UFF_starting) 
+    #    
+    #    # create individual intialization method (random vs intelligent assignment)
+    #    toolbox.register("individual", self.generateES, self.opt_vec, creator.Individual, creator.Strategy,
+    #                                                                            IND_SIZE,
+    #                                                                            MIN_VALUE,
+    #                                                                            MAX_VALUE,
+    #                                                                            MIN_STRATEGY,
+    #                                                                            MAX_STRATEGY)
+    #    #toolbox.register("individual", toolbox.assign_guess, creator.Individual)
+    #    
+    #    
+    #    
+    #    # objective function for this minimization 
+    #    # toolbox.register("evaluate", self.deap_multi_evalFitness)
+    #    toolbox.register("evaluate", self.construct_curr_UC_GA)
+    #    
+    #    # define evolution strategies
+    #    toolbox.register("mate", tools.cxESBlend, alpha=0.5)
+    #    toolbox.decorate("mate", self.checkStrategy(MIN_VALUE,
+    #                                           MAX_VALUE,
+    #                                           MAX_STRATEGY,
+    #                                           MAX_STRATEGY)
+    #                    )
+
+    #    ###toolbox.register("mutate", tools.mutPolynomialBounded, eta = 0.0001, low = 0.0, up = 10000.0, indpb = 0.1)
+    #    toolbox.register("mutate", tools.mutESLogNormal, c = 1.0, indpb = 0.9)
+    #    toolbox.decorate("mutate", self.checkStrategy(MIN_VALUE,
+    #                                             MAX_VALUE,
+    #                                             MAX_STRATEGY,
+    #                                             MAX_STRATEGY)
+    #                    )
+    #    ###toolbox.register("mutate", tools.mutESLogNormal, c = 1, indpb = 0.1)
+    #    
+    #    toolbox.register("select", tools.selTournament, tournsize = int(POP_SIZE/2))
+    #    ###toolbox.register("select", tools.selTournament, k = 10, tournsize = 64)
+    #    
+    #    
+    #    # parallelize or no
+    #    #pool = multiprocessing.Pool(processes = 7)
+    #    #toolbox.register("map", pool.map)
+    #    
+    #    
+    #    
+    #    # create a population of individuals
+    #    toolbox.register("population", tools.initRepeat, list, toolbox.individual, n = POP_SIZE)
+    #    population = toolbox.population()
+
+    #    # create islands to contain distinct populations
+    #    islands = [toolbox.population() for i in range(NISLANDS)]
+    #    
+    #    # create a hall of fame for each island
+    #    hofsize = max(1, int(POP_SIZE/10))
+    #    famous = [tools.HallOfFame(maxsize = hofsize) for i in range(NISLANDS)]
+    #    
+    #    # create a stats log for each island
+    #    stats = [tools.Statistics(lambda ind: ind.fitness.values) for i in range(NISLANDS)]
+    #    
+    #    for i in range(NISLANDS):
+    #        stats[i].register("avg", np.mean)
+    #        stats[i].register("std", np.std)
+    #        stats[i].register("min", np.min)
+    #        stats[i].register("max", np.max)
+    #    
+    #    
+    #    # MU, LAMDA parameters
+    #    MU, LAMBDA = POP_SIZE, POP_SIZE*2
+    #    
+    #    # run optimization with periodic migration between islands
+    #    for i in range(int(NGEN/MIG_FREQ)):
+    #        print("----------------")
+    #        print("Evolution period: " + str(i))
+    #        print("----------------")
+    #        for k in range(len(islands)):
+    #            print("------------------------")
+    #            print("Island " + str(k) + " evolution:")
+    #            print("------------------------")
+    #            #islands[k], log = algorithms.eaGenerateUpdate(toolbox, ngen = MIG_FREQ, halloffame = famous[k], stats = stats[k])
+    #            islands[k], log = algorithms.eaMuCommaLambda(islands[k], toolbox, mu=MU, lambda_ = LAMBDA, cxpb = 0.4, mutpb = 0.6, ngen = MIG_FREQ, halloffame = famous[k], stats = stats[k])
+    #        print("---------------")
+    #        print("MIGRATION!")
+    #        print("---------------")
+    #        self.custom_migRing(islands, 10, tools.selBest, replacement = tools.selWorst)
+    #    
+    #    # Create final population for the last run
+    #    final_famous = tools.HallOfFame(maxsize = 1)
+    #    final_stats = tools.Statistics(lambda ind: ind.fitness.values)
+    #    final_stats.register("avg", np.mean)
+    #    final_stats.register("std", np.std)
+    #    final_stats.register("min", np.min)
+    #    final_stats.register("max", np.max)
+    #    toolbox.register("final_population", tools.initRepeat, list, toolbox.individual, n = hofsize * NISLANDS)
+    #    final_population = toolbox.final_population()
+    #    
+    #    # copy over each island's famous individuals into last 
+    #    for i in range(NISLANDS):
+    #        for j in range(hofsize):
+    #            final_population[i*j + j] = famous[i][j]
+    #    
+    #    # make sure our ultimate hall of fame starts out as the best we've ever seen
+    #    final_famous.update(final_population)
+    #    
+    #    # reset MU, LAMBDA and rerun final evolution
+    #    MU, LAMBDA = hofsize*NISLANDS, hofsize*NISLANDS*2
+    #    final_pop, log = algorithms.eaMuCommaLambda(final_population, toolbox, mu=MU, lambda_ = LAMBDA, cxpb = 0.4, mutpb = 0.6, ngen = MIG_FREQ, halloffame = final_famous, stats = final_stats)
+
+
+    #    self.opt_vec = np.array(final_famous[0])
 
 
 
