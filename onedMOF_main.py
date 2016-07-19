@@ -385,6 +385,8 @@ class Assembly(object):
             #print(len(self.cxn_perms[i]))
             #print(self.cxn_perms[i])
 
+        print(self.cxn_perms[0])
+
 
     def compute_triclinic_xyz_shift(self, oned_abc_coord):
         """
@@ -639,7 +641,8 @@ class Assembly(object):
 
         rmse = 0
         for i in range(np.shape(fit)[1]):
-            rmse += np.linalg.norm(fit[:3,i]-dest[:3,i])
+            #rmse += np.linalg.norm(fit[:3,i]-dest[:3,i])
+            rmse += np.exp(np.linalg.norm(fit[:3,i]-dest[:3,i]))
 
         return M, rmse, fit 
 
@@ -771,11 +774,11 @@ class Assembly(object):
                 
                             
                     else:
-                        this_new_abc[self.oned_direct, k + j*len(self.oned_imgs)] += self.oned_imgs[k]
+                        this_new_abc[self.oned_direct, k + j*len(self.oned_imgs)] += self.opt_vec[1 + self.connect_to_rod[i][j]]+self.oned_imgs[k]
                 
 
 
-            # get the new xyz of all points
+            # get the new xyz of all points in cxn[i]
             this_new_xyz = np.dot(to_cartesian, this_new_abc)
 
             # apply shift (this is the fixed relative positions in rod constraint)
@@ -853,7 +856,7 @@ class Assembly(object):
         xvec = deepcopy(self.opt_vec)
         bounds = deepcopy(self.opt_bounds)
 
-        self.opt_vec[0] = 0.8
+        #self.opt_vec[0] = 0.8
         for i in range(0, len(self.rods_to_embed)):
             rod_ind = self.rods_to_embed[i]
             cxn_ind = self.cxns_to_embed[i]
@@ -872,20 +875,32 @@ class Assembly(object):
                                                        #'maxiter':2, 'maxfev':1})
                                                        #'maxiter':100000, 'maxfev':100000}
                                             )
+            #result = scipy.optimize.basinhopping(self.construct_curr_UC_SVD_initial, 
+            #                                 this_xvec, 
+            #                                 minimizer_kwargs={'args':(int(i),rod_ind,cxn_ind)}
+            #                                 #method='Nelder-Mead', 
+            #                                 #options ={'xtol': 0.1, 'ftol':0.1}#,  
+            #                                           #'maxiter':2, 'maxfev':1})
+            #                                           #'maxiter':100000, 'maxfev':100000}
+            #                                )
             print(result)
+
             if(i == 0):
                 self.opt_vec[0] = float(result.x[0])
                 print("(1) Scale factor, F: %s"%(self.opt_vec[0])) 
                 print("(2) Vector of rod shifts, dCs:")
                 if(rod_ind != -1):
-                    self.opt_vec[1+rod_ind] += result.x[1]
+                    self.opt_vec[1+rod_ind] = float(result.x[1])
+                    #self.opt_vec[2] = 0
                     print("Rod %d: %s"%(rod_ind,self.opt_vec[1+rod_ind]))
                     
 
             else:
                 if(rod_ind != -1):
-                    self.opt_vec[1+rod_ind] += result.x[0]
+                    self.opt_vec[1+rod_ind] = float(result.x[0])
                     print("Rod %d: %s"%(rod_ind,self.opt_vec[1+rod_ind]))
+
+        print(self.opt_vec)
                 
             
 
@@ -1263,6 +1278,7 @@ class Assembly(object):
         print("Optimal permuations are:")
         print(self.opt_perms)
         self.opt_vec[0]# *= 2
+
         to_cartesian = self.frame.update_UC_matrix(self.opt_vec[0], self.twod_direct)
         to_fractional = np.linalg.inv(to_cartesian)
 
@@ -1280,16 +1296,20 @@ class Assembly(object):
 
 
         final_rods_abc = []
+
+        # NOTE first rod is no longer optimized, used as a fixed starting pt
         for i in range(len(self.rods)):
+        #for i in self.rods_to_embed:
             this_new_abc = np.copy(self.rod_ref_abc[i])
 
             # start of this cxn info in the optimization vec
-            conn_start_ind = 1 + i
+            # conn_start_ind = 1 + i
 
             for j in range(len(self.rods[i])):
 
-                # shift ref pt based on curr val of rod shift
+                # shift all pts in rod based on curr val of rod shift
                 # print(xuse[1 + self.connect_to_rod[i][j]])
+                # NOTE
                 this_new_abc[self.oned_direct,j] += self.opt_vec[1 + i]
 
 
