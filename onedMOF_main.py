@@ -53,6 +53,7 @@ def parse_input():
             reading_rods = False
             reading_cxns = True
             cxns = [[] for i in range(num_cxns)]
+            cxns_periodic = [[] for i in range(num_cxns)]
             connect_to_rod = [[] for i in range(num_cxns)]
             #print(cxns)
             continue
@@ -82,12 +83,16 @@ def parse_input():
                         valid_connect = True
                         break
 
+                cxns_periodic[curr_cxn_index].append(int(parsed[2]))
+
                 if(not valid_connect):
                     raise ValueError("Error! Connection atom index (%s) does not match any index on the specified rods")
 
+                
+
         
 
-    return framework_name, molecule_name, dimensionality, rods, rod_centers, cxns, connect_to_rod
+    return framework_name, molecule_name, dimensionality, rods, rod_centers, cxns, cxns_periodic, connect_to_rod
 
             
 
@@ -95,7 +100,7 @@ def parse_input():
 class Assembly(object):
 
     def __init__(self, framework_name, molecule_name, dimensionality, 
-                 rods, rod_centers, cxns, connect_to_rod):
+                 rods, rod_centers, cxns, cxns_periodic, connect_to_rod):
 
         # Initializations of necessary data structs
         self.frame = Framework(framework_name)
@@ -110,6 +115,7 @@ class Assembly(object):
         self.rods = rods
         self.rod_centers = rod_centers
         self.cxns = cxns
+        self.cxns_periodic = cxns_periodic
         self.connect_to_rod = connect_to_rod
     
         # compute necessary quantities for optimization from inputs
@@ -310,9 +316,14 @@ class Assembly(object):
                 this_cxn_abc[1,j] = self.frame.rb[cxns[i][j]]
                 this_cxn_abc[2,j] = self.frame.rc[cxns[i][j]]
 
-                this_cxn_xyz[0,j] = self.frame.rx[cxns[i][j]]
-                this_cxn_xyz[1,j] = self.frame.ry[cxns[i][j]]
-                this_cxn_xyz[2,j] = self.frame.rz[cxns[i][j]]
+                # NOTE
+                # shift the cxn pt by its periodic shift (i.e. the cxn group transverses PBC)
+                this_cxn_abc[self.oned_direct,j]+=self.cxns_periodic[i][j]
+                this_cxn_xyz = np.dot(self.frame.to_cartesian, this_cxn_abc)
+                
+                #this_cxn_xyz[0,j] = self.frame.rx[cxns[i][j]]
+                #this_cxn_xyz[1,j] = self.frame.ry[cxns[i][j]]
+                #this_cxn_xyz[2,j] = self.frame.rz[cxns[i][j]]
 
                 this_cxn_ref_abc[0,j] = self.rod_centers_abc[rod_ind][0]
                 this_cxn_ref_abc[1,j] = self.rod_centers_abc[rod_ind][1]
@@ -382,10 +393,7 @@ class Assembly(object):
         for i in range(len(self.cxns)):
             self.cxn_perms.append(list(itertools.combinations([j for j in range(len(self.cxns[i])*len(self.oned_imgs))], 
                                                               len(self.mol.cxns))))
-            #print(len(self.cxn_perms[i]))
-            #print(self.cxn_perms[i])
 
-        print(self.cxn_perms[0])
 
 
     def compute_triclinic_xyz_shift(self, oned_abc_coord):
@@ -451,13 +459,10 @@ class Assembly(object):
                 self.rods_to_embed.append(-1)
                 self.cxns_to_embed.append(i)
 
-        print("\n\nComputing assembly order:")
-        print(self.rods_to_embed)
-        print(self.cxns_to_embed)
+
         if(len(self.rods_to_embed) != len(self.rods_to_embed)):
             raise ValueError("Assembly order not correct, diff length for rods and cxns")
-        for i in range(len(self.rods_to_embed)):
-            print("Rod %s -> Cxn: %s"%(str(self.rods_to_embed[i]),str(self.cxns_to_embed[i]))) 
+
         
         
         
@@ -481,6 +486,7 @@ class Assembly(object):
                       (self.cxns[i][j], self.connect_to_rod[i][j], str(self.cxn_abc[i][:,j]),
                                                                           str(self.cxn_xyz[i][:,j])))
 
+                print("Had periodicity: %s"%(self.cxns_periodic[i][j]))
                 print("Maps to ref pt of abc: %s -> xyz: %s" % (self.cxn_ref_abc[i][:,j],
                                                                 self.cxn_ref_xyz[i][:,j]))
                 print("Displacement from ref pt: %s" % (self.cxn_disp_xyz[i][:,j]))
@@ -496,6 +502,9 @@ class Assembly(object):
         for it in self.mol.permutations:
             print(it)
 
+        print("\n\nComputing assembly order:")
+        for i in range(len(self.rods_to_embed)):
+            print("Rod %s -> Cxn: %s"%(str(self.rods_to_embed[i]),str(self.cxns_to_embed[i]))) 
         #print(np.dot(self.frame.to_cartesian, np.array([0.547573,0.911527,0.531949])))
         #print(np.dot(self.frame.to_cartesian, np.array([0.0,0.0,2.0])))
         #print(self.compute_triclinic_xyz_shift(2.0))
@@ -716,7 +725,7 @@ class Assembly(object):
 
         return totalRMSE
 
-    def construct_curr_UC_SVD_initial(self, xuse, it, rod_ind, cxn_ind):
+    def optimize_rod_cxn_location(self, xuse, it, rod_ind, cxn_ind):
         """
         Creates the current representation of the unit cell so that we can
         evaluate how well the components are embedded in 3 space
@@ -727,13 +736,7 @@ class Assembly(object):
                 embedding variables (F, {dCs})
         """
 
-        # Steps to reconstruct unit cell
-        # 1: stasrt with opt_vec[0] (F) and opt_vec[1:n_rods] (set of dCs)
-        # 2: recompute cxn points based on F and dCs
-
-
-        
-
+        #print("Optimization step: %s\nRod: %s -> Cxn: %s\n"%(it,rod_ind,cxn_ind))
 
         # recompute UC matrix transformation based on current scale factor
         if(it == 0):
@@ -745,36 +748,32 @@ class Assembly(object):
         # objective fcn val
         totalRMSE = 0.0
 
-        # do this routine for  each cxn group
+        # do this routine for a cxn group (i.e. cxn_ind) that allows us to optimize the next rod (i.e. rod_ind)
         for i in range(cxn_ind, cxn_ind+1):
-            # for each cxn group, we need the original cxn coords and all their possible oned imgs
-            this_new_abc = np.zeros((3,np.shape(self.cxn_ref_abc[i])[1] * len(self.oned_imgs)))
+            # for each cxn group, we need to reconstruct the abc values based on the current
+            # optimization parameters, so initialize the data structure here
+            this_new_abc = np.zeros((3,np.shape(self.cxn_ref_abc[i])[1]))
 
             # loop over each cxn atom
             for j in range(len(self.cxns[i])):
-                # loop over each 1D img of that cxn atom
-                for k in range(len(self.oned_imgs)):
-                    # cxns[i]1  cxns[i]2
-                    this_new_abc[:, k + j*len(self.oned_imgs)] = self.cxn_ref_abc[i][:,j]
-                    # shift ref pt based on curr val of rod shift
-                    # shift ref pt as well based on the periodic image indicated in the opt_Vec
+
+                # copy the reference coordinate values
+                this_new_abc[:, j] = self.cxn_ref_abc[i][:,j]
                 
-                    # NOTE we only want to shift the rod we are currently optimizing    
-                    if(rod_ind != -1):
-                        #this_new_abc[self.oned_direct, k + j*len(self.oned_imgs)] += xuse[1 + self.connect_to_rod[i][j]]+self.oned_imgs[k]
-                        # check if the pt in this cxn is attached to rod under current optimization
-                        if(self.connect_to_rod[i][j] == rod_ind):
-                            if(it == 0):
-                                # just bc the number of opt variables is diff if it's the first assembly step
-                                this_new_abc[self.oned_direct, k + j*len(self.oned_imgs)] += xuse[1]+self.oned_imgs[k]
-                            else:
-                                this_new_abc[self.oned_direct, k + j*len(self.oned_imgs)] += xuse[0]+self.oned_imgs[k]
-                        else:
-                            this_new_abc[self.oned_direct, k + j*len(self.oned_imgs)] += self.opt_vec[1 + self.connect_to_rod[i][j]]+self.oned_imgs[k]
+
+                # check if the pt in this cxn is attached to rod under current optimization
+                if(self.connect_to_rod[i][j] == rod_ind):
+                    if(it == 0):
+                        # if this is first iteration, then xuse[0] is the scale factor 
+                        this_new_abc[self.oned_direct, j] += xuse[1]
+                    else:
+                        # if its a subsequent iteration then xuse[0] is the shift of rod_ind
+                        this_new_abc[self.oned_direct, j] += xuse[0]
+                # if it's not shift it by the value stored in the global optimization vector
+                else:
+                    this_new_abc[self.oned_direct, j] += self.opt_vec[1 + self.connect_to_rod[i][j]]
                 
                             
-                    else:
-                        this_new_abc[self.oned_direct, k + j*len(self.oned_imgs)] += self.opt_vec[1 + self.connect_to_rod[i][j]]+self.oned_imgs[k]
                 
 
 
@@ -787,13 +786,15 @@ class Assembly(object):
             
             # loop over each cxn atom
             for j in range(len(self.cxns[i])):
-                # loop over each 1D img of that cxn atom
-                for k in range(len(self.oned_imgs)):
-                    this_new_xyz[:, k + j*len(self.oned_imgs)] += self.cxn_disp_xyz[i][:,j]
+                # give it the triclinic shift if it's non 0
+                this_new_xyz[:, j] += self.cxn_disp_xyz[i][:,j]
 
+
+            #if(rod_ind == -1):
+            #    print(this_new_xyz)
 
             this_opt_perm_err = 100000000.0
-            for perm in self.cxn_perms[i]:
+            for perm in self.mol.permutations:
                 M, rmse, fit = self.evaluate_RMSE_from_SVD(self.mol.cxns, this_new_xyz[:, perm])
 
                 if(rmse < this_opt_perm_err):
@@ -801,20 +802,15 @@ class Assembly(object):
                     self.opt_perms[i] = perm
                     self.opt_mol_fit[i] = M
 
-                if(rmse < 0.1):
+                if(rmse < 0.01):
                     # This is a stopping criteria for the rmse
                     # break our loop over permutations if we've found the answer
                     break
-            
+           
+            # this summation only occurs once since we imposed we only optimize 1 cxn group at a time 
             totalRMSE += this_opt_perm_err
 
-        if(rod_ind == -1):
-            # in this case we only we're finding the best cxn fit w/o adjusting rod position
-            # return 0.0 so the optimization succeeds and quits after 1 fcn iteration
-            return 0.0
-        else:
-            return totalRMSE
-
+        return totalRMSE
 
 
     def rmse(self, xyz1, xyz2):
@@ -866,8 +862,7 @@ class Assembly(object):
             else:
                 this_xvec = deepcopy(self.opt_vec[1+rod_ind:1+rod_ind+1])
 
-
-            result = scipy.optimize.minimize(self.construct_curr_UC_SVD_initial, 
+            result = scipy.optimize.minimize(self.optimize_rod_cxn_location, 
                                              this_xvec, 
                                              args=(int(i),rod_ind,cxn_ind),
                                              method='Nelder-Mead', 
@@ -875,16 +870,10 @@ class Assembly(object):
                                                        #'maxiter':2, 'maxfev':1})
                                                        #'maxiter':100000, 'maxfev':100000}
                                             )
-            #result = scipy.optimize.basinhopping(self.construct_curr_UC_SVD_initial, 
-            #                                 this_xvec, 
-            #                                 minimizer_kwargs={'args':(int(i),rod_ind,cxn_ind)}
-            #                                 #method='Nelder-Mead', 
-            #                                 #options ={'xtol': 0.1, 'ftol':0.1}#,  
-            #                                           #'maxiter':2, 'maxfev':1})
-            #                                           #'maxiter':100000, 'maxfev':100000}
-            #                                )
-            print(result)
+                
 
+
+            # save results to global optimization vector
             if(i == 0):
                 self.opt_vec[0] = float(result.x[0])
                 print("(1) Scale factor, F: %s"%(self.opt_vec[0])) 
@@ -1495,6 +1484,6 @@ class Assembly(object):
 if(__name__ == "__main__"):
     # NOTE CWD must be the directory that has an input file onedMOF.input and then all the data files
     # described in oneDMOF.input
-    framework_name, molecule_name, dimensionality, rods, rod_centers, cxns, connect_to_rod = parse_input()
+    framework_name, molecule_name, dimensionality, rods, rod_centers, cxns, cxns_periodic, connect_to_rod = parse_input()
 
-    assemble = Assembly(framework_name, molecule_name, dimensionality, rods, rod_centers, cxns, connect_to_rod)
+    assemble = Assembly(framework_name, molecule_name, dimensionality, rods, rod_centers, cxns, cxns_periodic, connect_to_rod)

@@ -1,6 +1,6 @@
 Framework FeBDP.cif
 Original bdp.sub
-Molecule Syn070229.sub
+Molecule Syn062036.sub
 Dimensionality 2
 Rods 2
 Rod 0 0.0 0.5 0.0
@@ -27,22 +27,22 @@ Rod 1 0.5 0.0 0.0
 10  67
 Connections 4
 Connection 0
-1   55   0
-2   56   0
-3   63   0
-4   64   0
+1   55 
+2   56
+3   63
+4   64
 Connection 1
-1   52   1
-2   59   0
-3   60   0
-4   67   1
+1   52
+2   59
+3   60
+4   67
 Connection 2
-1   54   1
-2   57   0
-3   62   0
-4   65   1
+1   54
+2   57
+3   62
+4   65
 Connection 3
-1   53   0
-2   58   0
-3   61   0
-4   66   0
+1   53
+2   58
+3   61
+4   66
